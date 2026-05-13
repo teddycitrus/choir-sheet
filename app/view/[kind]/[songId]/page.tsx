@@ -2,7 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
+import { useQuery } from "convex/react";
 import { Minus, Moon, Plus, Sun, X } from "lucide-react";
+import { api } from "../../../../convex/_generated/api";
+import type { Id } from "../../../../convex/_generated/dataModel";
 
 const TX = "transition-[color,background-color,border-color,opacity] duration-150 ease-in-out";
 
@@ -214,29 +217,52 @@ function DocxViewer({
 }
 
 export default function ViewPage() {
-  const params = useParams<{ kind: string; fileName: string }>();
+  const params = useParams<{ kind: string; songId: string }>();
   const searchParams = useSearchParams();
 
-  const kind = params?.kind ?? "";
-  const fileName = decodeURIComponent(params?.fileName ?? "");
+  const rawKind = params?.kind ?? "";
+  const songId = params?.songId ?? "";
   const songName = searchParams?.get("song") ?? "";
+  const kindIsValid = rawKind === "chords" || rawKind === "lyrics";
+  const label = rawKind === "chords" ? "Chords" : "Lyrics";
 
-  const isDocx = fileName.toLowerCase().endsWith(".docx");
-  const label = kind === "chords" ? "Chords" : "Lyrics";
-  const fileUrl = `/api/files/${kind}/${encodeURIComponent(fileName)}`;
+  // Fetch a fresh signed URL each open (Convex storage URLs expire).
+  // useQuery returns undefined while loading, null if the song/file is gone.
+  const fileInfo = useQuery(
+    api.songs.getFileUrl,
+    kindIsValid ? { id: songId as Id<"songs">, kind: rawKind } : "skip",
+  );
 
-  // Chrome = header + floating docx controls. Tapping the docx body toggles.
-  // PDFs keep chrome visible always (the iframe captures taps itself).
+  const isDocx = fileInfo?.ext === "docx";
+  const fileUrl = fileInfo?.url ?? null;
+  const displayName = songName || fileInfo?.songName || "";
+
   const [chromeVisible, setChromeVisible] = useState(true);
 
   useEffect(() => {
-    document.title = songName ? `${songName} — ${label}` : label;
-  }, [songName, label]);
+    document.title = displayName ? `${displayName} — ${label}` : label;
+  }, [displayName, label]);
 
-  if (kind !== "chords" && kind !== "lyrics") {
+  if (!kindIsValid) {
     return (
       <div className="fixed inset-0 flex items-center justify-center bg-[#0a0a0a] text-[#a1a1aa] text-sm">
         Invalid file kind.
+      </div>
+    );
+  }
+
+  if (fileInfo === undefined) {
+    return (
+      <div className="fixed inset-0 flex items-center justify-center bg-[#0a0a0a]">
+        <div className="w-5 h-5 border border-[#3f3f46] border-t-white rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (fileInfo === null || !fileUrl) {
+    return (
+      <div className="fixed inset-0 flex items-center justify-center bg-[#0a0a0a] text-[#a1a1aa] text-sm">
+        File not found.
       </div>
     );
   }
@@ -256,7 +282,7 @@ export default function ViewPage() {
           <iframe
             src={fileUrl}
             className="w-full h-full bg-white"
-            title={songName ? `${songName} — ${label}` : label}
+            title={displayName ? `${displayName} — ${label}` : label}
           />
         )}
       </div>
@@ -265,7 +291,7 @@ export default function ViewPage() {
         className={`absolute top-0 inset-x-0 z-20 bg-[#0a0a0a] border-b border-white/10 px-4 py-3 flex items-center justify-between transition-opacity duration-200 ${chromeVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
       >
         <div className="min-w-0">
-          <p className="text-white text-sm font-medium truncate">{songName || fileName}</p>
+          <p className="text-white text-sm font-medium truncate">{displayName || songId}</p>
           <p className="text-[#a1a1aa] text-xs truncate">
             {label} · {isDocx ? "DOCX" : "PDF"}
           </p>

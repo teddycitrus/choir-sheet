@@ -5,6 +5,9 @@ import {
   ChevronDown, ChevronUp, ExternalLink, FileText, Link as LinkIcon, Lock,
   MessageSquareText, Paperclip, Pencil, Plus, Search, Shuffle, Trash2, Upload, X
 } from "lucide-react";
+import { useMutation, useQuery } from "convex/react";
+import { api } from "../convex/_generated/api";
+import type { Id } from "../convex/_generated/dataModel";
 import { Song } from "../types/Song";
 
 // ── Design tokens ──────────────────────────────────────────────────────────
@@ -67,8 +70,13 @@ const EMPTY_FORM = {
   type: [] as string[],
   usage_counter: 0,
   lyrics: "",
-  chordsFile: "",
-  lyricsFile: "",
+  // Convex storage IDs (strings). Empty string = no file attached.
+  chordsStorageId: "",
+  lyricsStorageId: "",
+  // Visible-only metadata used by FileSlot to label the "saved file" pill.
+  // Not sent to the server — derived from the selected song on hydrate.
+  chordsFileType: null as "pdf" | "docx" | null,
+  lyricsFileType: null as "pdf" | "docx" | null,
   notes: "",
 };
 
@@ -138,30 +146,34 @@ function ModalFooter({ children }: { children: React.ReactNode }) {
 // upload route does a magic-byte recheck on the server.
 function FileSlot({
   idPrefix,
-  savedFileName,   // filename already persisted in Mongo (edit mode)
+  hasSaved,        // a file is already attached to this song (edit mode)
+  savedFileType,   // "pdf" or "docx" — for the saved pill label
   pickedFile,      // File just chosen from disk, not yet uploaded
   onPick,
   onClearSaved,
   onClearPicked,
 }: {
   idPrefix: string;
-  savedFileName: string;
+  // Whether a file is already saved on this song (true = Convex storage ID set).
+  hasSaved: boolean;
+  // "pdf" or "docx" — used purely to label the saved pill.
+  savedFileType: "pdf" | "docx" | null;
   pickedFile: File | null;
   onPick: (f: File | null) => void;
   onClearSaved: () => void;
   onClearPicked: () => void;
 }) {
   const inputId = `${idPrefix}-file`;
-  const hasSaved = !!savedFileName && !pickedFile;
+  const showSaved = hasSaved && !pickedFile;
   const hasPicked = !!pickedFile;
 
   return (
     <div className="mt-2">
-      {hasSaved && (
+      {showSaved && (
         <div className="flex items-center justify-between rounded-md border border-[#262626] bg-[#0a0a0a] px-3 py-2 text-xs">
           <span className="inline-flex items-center gap-1.5 text-white min-w-0">
             <FileText size={12} className="shrink-0 text-[#71717a]" />
-            <span className="truncate">{savedFileName}</span>
+            <span className="truncate">Saved {savedFileType ? savedFileType.toUpperCase() : "file"}</span>
           </span>
           <div className="flex items-center gap-1 shrink-0">
             <label htmlFor={inputId} className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-white border border-[#262626] hover:bg-[#1a1a1a] cursor-pointer ${TX}`}>
@@ -302,7 +314,8 @@ function SongFormBody({
         />
         <FileSlot
           idPrefix="chords"
-          savedFileName={formData.chordsFile}
+          hasSaved={!!formData.chordsStorageId}
+          savedFileType={formData.chordsFileType}
           pickedFile={chordsFileUpload}
           onPick={onPickChordsFile}
           onClearSaved={onClearSavedChordsFile}
@@ -321,7 +334,8 @@ function SongFormBody({
         />
         <FileSlot
           idPrefix="lyrics"
-          savedFileName={formData.lyricsFile}
+          hasSaved={!!formData.lyricsStorageId}
+          savedFileType={formData.lyricsFileType}
           pickedFile={lyricsFileUpload}
           onPick={onPickLyricsFile}
           onClearSaved={onClearSavedLyricsFile}
@@ -388,9 +402,11 @@ function SongFormBody({
 // ── Home ───────────────────────────────────────────────────────────────────
 
 export default function Home() {
-  const [songs, setSongs] = useState<Song[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  // Live query — re-runs automatically whenever the `songs` table changes.
+  // Returns `undefined` until the first response arrives.
+  const songsResult = useQuery(api.songs.list);
+  const songs = (songsResult ?? []) as unknown as Song[];
+  const loading = songsResult === undefined;
   const [auth, setAuth] = useState(false);
   const [authError, setAuthError] = useState("");
   const [search, setSearch] = useState("");
@@ -427,19 +443,11 @@ export default function Home() {
   const [tableScrolled, setTableScrolled] = useState(false);
   const [confirming, setConfirming] = useState(false);
 
-  const fetchSongs = useCallback(async () => {
-    try {
-      const res = await fetch("/api/songs");
-      if (!res.ok) throw new Error("Failed to fetch songs");
-      setSongs(await res.json());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { fetchSongs(); }, [fetchSongs]);
+  // Convex mutations — auth token is passed per-call.
+  const createSong       = useMutation(api.songs.create);
+  const updateSong       = useMutation(api.songs.update);
+  const removeSong       = useMutation(api.songs.remove);
+  const incrementUsageMu = useMutation(api.songs.incrementUsage);
 
   // Restore any session-persisted auth token on first mount.
   useEffect(() => {
@@ -463,34 +471,25 @@ export default function Home() {
     return () => el.removeEventListener("scroll", update);
   }, [loading]);
 
-  // Authenticated fetch helper — adds the Bearer token and handles 401 by
-  // clearing state and prompting the user to sign in again.
-  const authFetch = useCallback(async (input: RequestInfo | URL, init: RequestInit = {}) => {
-    const headers = new Headers(init.headers);
-    if (authToken) headers.set("Authorization", `Bearer ${authToken}`);
-    const res = await fetch(input, { ...init, headers });
-    if (res.status === 401) {
-      setAuth(false);
-      setAuthToken(null);
-      if (typeof window !== "undefined") window.sessionStorage.removeItem("songchart_token");
-      throw new Error("Your session expired. Please sign in again.");
-    }
-    return res;
-  }, [authToken]);
-
-  // POST a single file to /api/files/upload and return the B2 filename.
-  const uploadSongFile = useCallback(async (kind: "chords" | "lyrics", file: File): Promise<string> => {
-    const fd = new window.FormData();
-    fd.append("kind", kind);
-    fd.append("file", file);
-    const res = await authFetch("/api/files/upload", { method: "POST", body: fd });
+  // Upload a file into Convex storage. Returns the storage ID, which the
+  // caller persists on the song via the create/update mutation. The
+  // chords/lyrics distinction lives entirely in which song field it's
+  // assigned to — Convex storage doesn't care.
+  const generateUploadUrlMu = useMutation(api.songs.generateUploadUrl);
+  const uploadSongFile = useCallback(async (file: File, token: string): Promise<string> => {
+    const uploadUrl = await generateUploadUrlMu({ token });
+    const res = await fetch(uploadUrl, {
+      method: "POST",
+      headers: { "Content-Type": file.type },
+      body: file,
+    });
     if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data?.error || `Upload failed (${res.status})`);
+      const text = await res.text().catch(() => "");
+      throw new Error(`Upload failed (${res.status}): ${text}`);
     }
-    const data = await res.json() as { fileName: string };
-    return data.fileName;
-  }, [authFetch]);
+    const data = await res.json() as { storageId: string };
+    return data.storageId;
+  }, [generateUploadUrlMu]);
 
   useEffect(() => {
     if (selectedSong) {
@@ -500,8 +499,10 @@ export default function Home() {
         capo: selectedSong.capo, bpm: selectedSong.bpm, beat: selectedSong.beat,
         type: selectedSong.type ?? [], usage_counter: selectedSong.usage_counter ?? 0,
         lyrics: selectedSong.lyrics ?? "",
-        chordsFile: selectedSong.chordsFile ?? "",
-        lyricsFile: selectedSong.lyricsFile ?? "",
+        chordsStorageId: selectedSong.chordsStorageId ?? "",
+        lyricsStorageId: selectedSong.lyricsStorageId ?? "",
+        chordsFileType:  selectedSong.chordsFileType ?? null,
+        lyricsFileType:  selectedSong.lyricsFileType ?? null,
         notes: selectedSong.notes ?? "",
       });
     }
@@ -543,13 +544,14 @@ export default function Home() {
   // chooser modal; otherwise go straight to whichever one exists.
   const openSource = (kind: "chords" | "lyrics", song: Song) => {
     const url = kind === "chords" ? song.chords : song.lyrics;
-    const fileName = kind === "chords" ? song.chordsFile : song.lyricsFile;
-    if (url && fileName) {
+    const fileUrl = kind === "chords" ? song.chordsFileUrl : song.lyricsFileUrl;
+    if (url && fileUrl) {
       setSourceChooser({ kind, song });
     } else if (url) {
       window.open(url, "_blank", "noopener,noreferrer");
-    } else if (fileName) {
-      const viewUrl = `/view/${kind}/${encodeURIComponent(fileName)}?song=${encodeURIComponent(song.name)}`;
+    } else if (fileUrl) {
+      // Viewer page fetches a fresh signed URL from Convex on open.
+      const viewUrl = `/view/${kind}/${song._id}?song=${encodeURIComponent(song.name)}`;
       window.open(viewUrl, "_blank", "noopener,noreferrer");
     }
   };
@@ -582,9 +584,9 @@ export default function Home() {
   // Validate chords/lyrics: at least one of (URL, saved file, picked file).
   function validateSources(): string | null {
     const hasChords =
-      !!formData.chords.trim() || !!formData.chordsFile || !!chordsFileUpload;
+      !!formData.chords.trim() || !!formData.chordsStorageId || !!chordsFileUpload;
     const hasLyrics =
-      !!formData.lyrics.trim() || !!formData.lyricsFile || !!lyricsFileUpload;
+      !!formData.lyrics.trim() || !!formData.lyricsStorageId || !!lyricsFileUpload;
     if (!hasChords) return "Chords: provide a URL or upload a file.";
     if (!hasLyrics) return "Lyrics: provide a URL or upload a file.";
     return null;
@@ -598,25 +600,36 @@ export default function Home() {
       const invalid = validateSources();
       if (invalid) throw new Error(invalid);
 
-      // Upload any picked files first so the song row lands with a valid filename.
-      let chordsFileName = formData.chordsFile;
-      let lyricsFileName = formData.lyricsFile;
-      if (chordsFileUpload) chordsFileName = await uploadSongFile("chords", chordsFileUpload);
-      if (lyricsFileUpload) lyricsFileName = await uploadSongFile("lyrics", lyricsFileUpload);
+      if (!authToken) throw new Error("Not signed in");
 
-      const payload = { ...formData, chordsFile: chordsFileName, lyricsFile: lyricsFileName };
-      const res = await authFetch("/api/edit", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+      // Upload any picked files first so the song row lands with a valid storage ID.
+      let chordsStorageId: string = formData.chordsStorageId;
+      let lyricsStorageId: string = formData.lyricsStorageId;
+      if (chordsFileUpload) chordsStorageId = await uploadSongFile(chordsFileUpload, authToken);
+      if (lyricsFileUpload) lyricsStorageId = await uploadSongFile(lyricsFileUpload, authToken);
+
+      await createSong({
+        token: authToken,
+        name:            formData.name,
+        listen:          formData.listen || undefined,
+        chords:          formData.chords,
+        key:             formData.key,
+        transpose:       formData.transpose,
+        capo:            formData.capo,
+        bpm:             formData.bpm,
+        beat:            formData.beat,
+        type:            formData.type.length > 0 ? formData.type : undefined,
+        usage_counter:   formData.usage_counter || undefined,
+        lyrics:          formData.lyrics || undefined,
+        chordsStorageId: (chordsStorageId as Id<"_storage">) || undefined,
+        lyricsStorageId: (lyricsStorageId as Id<"_storage">) || undefined,
+        notes:           formData.notes || undefined,
       });
-      if (!res.ok) throw new Error("Failed to add song");
 
       setShowAddModal(false);
       setFormData({ ...EMPTY_FORM });
       setChordsFileUpload(null);
       setLyricsFileUpload(null);
-      await fetchSongs();
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
@@ -632,30 +645,39 @@ export default function Home() {
       const invalid = validateSources();
       if (invalid) throw new Error(invalid);
 
-      // Upload newly picked files (replaces any existing saved file).
-      let chordsFileName = formData.chordsFile;
-      let lyricsFileName = formData.lyricsFile;
-      if (chordsFileUpload) chordsFileName = await uploadSongFile("chords", chordsFileUpload);
-      if (lyricsFileUpload) lyricsFileName = await uploadSongFile("lyrics", lyricsFileUpload);
+      if (!authToken) throw new Error("Not signed in");
+      if (!selectedSong?._id) throw new Error("Missing song id");
 
-      const payload = {
-        ...formData,
-        chordsFile: chordsFileName,
-        lyricsFile: lyricsFileName,
-        _id: selectedSong?._id,
-      };
-      const res = await authFetch("/api/update", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+      // Upload newly picked files (replaces any existing saved file — the
+      // Convex update mutation deletes the old storage object).
+      let chordsStorageId: string = formData.chordsStorageId;
+      let lyricsStorageId: string = formData.lyricsStorageId;
+      if (chordsFileUpload) chordsStorageId = await uploadSongFile(chordsFileUpload, authToken);
+      if (lyricsFileUpload) lyricsStorageId = await uploadSongFile(lyricsFileUpload, authToken);
+
+      await updateSong({
+        token: authToken,
+        id:              selectedSong._id as Id<"songs">,
+        name:            formData.name,
+        listen:          formData.listen || undefined,
+        chords:          formData.chords,
+        key:             formData.key,
+        transpose:       formData.transpose,
+        capo:            formData.capo,
+        bpm:             formData.bpm,
+        beat:            formData.beat,
+        type:            formData.type.length > 0 ? formData.type : undefined,
+        usage_counter:   formData.usage_counter || undefined,
+        lyrics:          formData.lyrics || undefined,
+        chordsStorageId: (chordsStorageId as Id<"_storage">) || undefined,
+        lyricsStorageId: (lyricsStorageId as Id<"_storage">) || undefined,
+        notes:           formData.notes || undefined,
       });
-      if (!res.ok) throw new Error("Failed to update song");
 
       setShowEditModal(false);
       setSelectedSong(null);
       setChordsFileUpload(null);
       setLyricsFileUpload(null);
-      await fetchSongs();
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
@@ -705,17 +727,17 @@ export default function Home() {
     if (!repertoire) return;
     setConfirming(true);
     try {
-      const res = await authFetch("/api/increment-usage", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ids: [repertoire.entrance._id, repertoire.communion._id, repertoire.recessional._id],
-        }),
+      if (!authToken) throw new Error("Not signed in");
+      await incrementUsageMu({
+        token: authToken,
+        ids: [
+          repertoire.entrance._id    as Id<"songs">,
+          repertoire.communion._id   as Id<"songs">,
+          repertoire.recessional._id as Id<"songs">,
+        ],
       });
-      if (!res.ok) throw new Error("Failed to update usage");
       setShowRepertoireModal(false);
       setRepertoire(null);
-      await fetchSongs();
     } catch (err) {
       setRepertoireError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
@@ -728,14 +750,11 @@ export default function Home() {
     setDeleting(true);
     setDeleteError("");
     try {
-      const res = await authFetch("/api/delete", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ _id: songToDelete._id }),
-      });
-      if (!res.ok) throw new Error("Failed to delete song");
+      if (!authToken) throw new Error("Not signed in");
+      // TODO (step E): clean up B2 files using the returned filenames. For
+      // now we accept some orphaning until file storage moves to Convex.
+      await removeSong({ token: authToken, id: songToDelete._id as Id<"songs"> });
       setSongToDelete(null);
-      await fetchSongs();
     } catch (err) {
       setDeleteError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
@@ -749,14 +768,6 @@ export default function Home() {
     return (
       <div className="flex items-center justify-center min-h-screen bg-[#0a0a0a]">
         <div className="w-5 h-5 border border-[#3f3f46] border-t-[#71717a] rounded-full animate-spin" />
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-[#0a0a0a]">
-        <p className="text-[#71717a] text-sm">{error}</p>
       </div>
     );
   }
@@ -857,8 +868,8 @@ export default function Home() {
                 lyricsFileUpload={lyricsFileUpload}
                 onPickChordsFile={setChordsFileUpload}
                 onPickLyricsFile={setLyricsFileUpload}
-                onClearSavedChordsFile={() => setFormData(p => ({ ...p, chordsFile: "" }))}
-                onClearSavedLyricsFile={() => setFormData(p => ({ ...p, lyricsFile: "" }))}
+                onClearSavedChordsFile={() => setFormData(p => ({ ...p, chordsStorageId: "" }))}
+                onClearSavedLyricsFile={() => setFormData(p => ({ ...p, lyricsStorageId: "" }))}
                 onClearPickedChordsFile={() => setChordsFileUpload(null)}
                 onClearPickedLyricsFile={() => setLyricsFileUpload(null)}
               />
@@ -909,8 +920,8 @@ export default function Home() {
                 lyricsFileUpload={lyricsFileUpload}
                 onPickChordsFile={setChordsFileUpload}
                 onPickLyricsFile={setLyricsFileUpload}
-                onClearSavedChordsFile={() => setFormData(p => ({ ...p, chordsFile: "" }))}
-                onClearSavedLyricsFile={() => setFormData(p => ({ ...p, lyricsFile: "" }))}
+                onClearSavedChordsFile={() => setFormData(p => ({ ...p, chordsStorageId: "" }))}
+                onClearSavedLyricsFile={() => setFormData(p => ({ ...p, lyricsStorageId: "" }))}
                 onClearPickedChordsFile={() => setChordsFileUpload(null)}
                 onClearPickedLyricsFile={() => setLyricsFileUpload(null)}
               />
@@ -989,7 +1000,8 @@ export default function Home() {
       {sourceChooser && (() => {
         const { kind, song } = sourceChooser;
         const url = kind === "chords" ? song.chords : song.lyrics;
-        const fileName = kind === "chords" ? song.chordsFile : song.lyricsFile;
+        const fileUrl  = kind === "chords" ? song.chordsFileUrl  : song.lyricsFileUrl;
+        const fileType = kind === "chords" ? song.chordsFileType : song.lyricsFileType;
         const label = kind === "chords" ? "Chords" : "Lyrics";
         return (
           <ModalOverlay onClose={() => setSourceChooser(null)}>
@@ -1014,9 +1026,9 @@ export default function Home() {
                     <ExternalLink size={12} className="text-[#71717a]" />
                   </a>
                 ) : null}
-                {fileName ? (
+                {fileUrl ? (
                   <a
-                    href={`/view/${kind}/${encodeURIComponent(fileName)}?song=${encodeURIComponent(song.name)}`}
+                    href={`/view/${kind}/${song._id}?song=${encodeURIComponent(song.name)}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     onClick={() => setSourceChooser(null)}
@@ -1025,10 +1037,10 @@ export default function Home() {
                     <span className="inline-flex items-center gap-2">
                       <FileText size={14} /> File
                     </span>
-                    <span className="text-[#71717a] text-xs">{fileName.toLowerCase().endsWith(".pdf") ? "PDF" : "DOCX"}</span>
+                    <span className="text-[#71717a] text-xs">{fileType ? fileType.toUpperCase() : ""}</span>
                   </a>
                 ) : null}
-                {!url && !fileName && (
+                {!url && !fileUrl && (
                   <p className="text-[#71717a] text-sm text-center">No sources available.</p>
                 )}
               </div>
@@ -1181,7 +1193,7 @@ export default function Home() {
                     ) : <span className="text-[#3f3f46]">—</span>}
                   </td>
                   <td className="px-4 py-3">
-                    {(song.chords || song.chordsFile) ? (
+                    {(song.chords || song.chordsFileUrl) ? (
                       <button
                         type="button"
                         onClick={e => { e.stopPropagation(); openSource("chords", song); }}
@@ -1192,7 +1204,7 @@ export default function Home() {
                     ) : <span className="text-[#3f3f46]">—</span>}
                   </td>
                   <td className="px-4 py-3">
-                    {(song.lyrics || song.lyricsFile) ? (
+                    {(song.lyrics || song.lyricsFileUrl) ? (
                       <button
                         type="button"
                         onClick={e => { e.stopPropagation(); openSource("lyrics", song); }}
@@ -1274,8 +1286,8 @@ export default function Home() {
         ) : (
           <ul className="divide-y divide-[#1a1a1a]">
             {filteredSongs.map(song => {
-              const hasChords = !!(song.chords || song.chordsFile);
-              const hasLyrics = !!(song.lyrics || song.lyricsFile);
+              const hasChords = !!(song.chords || song.chordsFileUrl);
+              const hasLyrics = !!(song.lyrics || song.lyricsFileUrl);
               const meta: { label: string; value: string }[] = [
                 { label: "Key",       value: song.key },
                 { label: "BPM",       value: song.bpm },

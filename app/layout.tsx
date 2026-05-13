@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Playfair_Display } from "next/font/google";
 import "./globals.css";
+import { ConvexClientProvider } from "./ConvexClientProvider";
 
 const playfair = Playfair_Display({
   subsets: ["latin"],
@@ -22,7 +23,7 @@ export default function RootLayout({
   return (
     <html lang="en" className={playfair.variable}>
       <body className="bg-[#0a0a0a] min-h-screen">
-        {children}
+        <ConvexClientProvider>{children}</ConvexClientProvider>
       </body>
     </html>
   );
