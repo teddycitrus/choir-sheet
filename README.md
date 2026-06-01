@@ -1,11 +1,15 @@
 <a id="readme-top"></a>
 
 <!-- PROJECT SHIELDS -->
-[![Contributors][contributors-shield]][contributors-url]
-[![Forks][forks-shield]][forks-url]
-[![Stargazers][stars-shield]][stars-url]
-[![Issues][issues-shield]][issues-url]
-[![MIT License][license-shield]][license-url]
+<div align="center">
+  
+  [![Contributors][contributors-shield]][contributors-url]
+  [![Forks][forks-shield]][forks-url]
+  [![Stargazers][stars-shield]][stars-url]
+  [![Issues][issues-shield]][issues-url]
+  [![MIT License][license-shield]][license-url]
+  
+</div>  
 
 <!-- PROJECT LOGO -->
 <br />
@@ -58,9 +62,9 @@ Songchart is a web app built for the youth choir at Saint Alphonsa Cathedral Mis
 
 Key capabilities:
 **Song database**
-- title, key, BPM, capo, and transposition stored in MongoDB, browsable from any phone, tablet, or desktop
+- title, key, BPM, capo, and transposition stored in Convex, browsable from any phone, tablet, or desktop with real-time sync across all connected clients
 **Inline document viewer**
-- chord sheets and lyrics are stored as `.docx` files in Backblaze B2 object storage and rendered in-browser via `mammoth`, with no download required
+- chord sheets and lyrics are stored as `.docx` files in Convex file storage and rendered in-browser via `mammoth`, with no download required
 **Weighted setlist generator**
 - builds randomised rehearsal and performance setlists, with configurable song weights so frequently-needed songs appear more often
 **Protected write access**
@@ -73,7 +77,7 @@ Key capabilities:
 | layer | tools |
 |---|---|
 | frontend | ![Next.js](https://img.shields.io/badge/Next.js-000000?style=flat-square&logo=nextdotjs&logoColor=white) ![React](https://img.shields.io/badge/React-20232A?style=flat-square&logo=react&logoColor=61DAFB) ![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white) |
-| backend | ![Node.js](https://img.shields.io/badge/Node.js-339933?style=flat-square&logo=nodedotjs&logoColor=white) ![MongoDB](https://img.shields.io/badge/MongoDB-47A248?style=flat-square&logo=mongodb&logoColor=white) ![Backblaze B2](https://img.shields.io/badge/Backblaze_B2-E93B36?style=flat-square&logo=backblaze&logoColor=white) |
+| backend | ![Convex](https://img.shields.io/badge/Convex-EE342F?style=flat-square&logo=convex&logoColor=white) |
 | language | ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white) |
 | deployment | ![Vercel](https://img.shields.io/badge/Vercel-000000?style=flat-square&logo=vercel&logoColor=white) |
 
@@ -85,8 +89,7 @@ Key capabilities:
 ### Prerequisites
 
 * Node.js 18+
-* A MongoDB database (MongoDB Atlas free tier works)
-* A Backblaze B2 bucket for storing `.docx` chord/lyric files
+* A Convex account (free tier works)
 
 ```sh
 npm install npm@latest -g
@@ -105,19 +108,19 @@ npm install npm@latest -g
    npm install
    ```
 
-3. Create a `.env.local` file in the project root and fill in your values
-   ```env
-   MONGODB_URI="mongodb+srv://user:password@cluster.mongodb.net/songchart"
+3. Initialise Convex — this will prompt a GitHub login, create a project, and write `NEXT_PUBLIC_CONVEX_URL` to `.env.local` automatically
+   ```sh
+   npx convex dev
+   ```
 
-   B2_ENDPOINT="https://s3.us-west-004.backblazeb2.com"
-   B2_BUCKET_NAME="your-bucket-name"
-   B2_KEY_ID="your-key-id"
-   B2_APP_KEY="your-app-key"
+4. Add the remaining values to `.env.local`
+   ```env
+   NEXT_PUBLIC_CONVEX_URL="https://your-deployment.convex.cloud"
 
    JWT_SECRET="a-long-random-secret"
    ```
 
-4. Start the development server
+5. Start the development server in a second terminal
    ```sh
    npm run dev
    ```
@@ -131,7 +134,7 @@ npm install npm@latest -g
 
 **Browse the repertoire**
 
-the home dashboard lists all songs with their key, BPM, and capo. Click any song to open a detail view with the chord sheet rendered inline from the `.docx` file stored in Backblaze B2.
+the home dashboard lists all songs with their key, BPM, and capo. Click any song to open a detail view with the chord sheet rendered inline from the `.docx` file stored in Convex file storage. The list updates in real time across all connected clients.
 
 **Setlist generator**
 
@@ -149,26 +152,28 @@ authenticated users can create new entries or delete outdated ones. The song sch
   "capo": "none",
   "bpm": 77,
   "beat": "4/4",
-  "chords": "https://f004.backblazeb2.com/file/your-bucket/10000-reasons.docx"
+  "storageId": "<convex storage id>"
 }
 ```
 
-**API routes** — all data operations go through Next.js API routes under `/pages/api`:
+**Backend functions** — all data operations are handled by Convex functions in `convex/`:
 
-| route | method | description |
+| function | type | description |
 |---|---|---|
-| `/api/songs` | `GET` | Fetch all song entries from MongoDB |
-| `/api/edit` | `POST` | Create a new song entry |
-| `/api/auth` | `POST` | Authenticate and receive a JWT |
+| `songs.list` | query | Fetch all songs — reactive, auto-updates on change |
+| `songs.create` | mutation | Create a new song entry |
+| `songs.remove` | mutation | Delete a song and its stored file |
+| `songs.generateUploadUrl` | mutation | Get a short-lived URL for `.docx` file upload |
+| `songs.saveStorageId` | mutation | Persist a file's storage ID onto a song document |
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 <!-- ROADMAP -->
 ## Roadmap
 
-- [x] Song database with full metadata and inline `.docx` viewer powered by Backblaze B2 and `mammoth`
+- [x] Song database with full metadata and inline `.docx` viewer powered by Convex file storage and `mammoth`
 - [x] Weighted setlist generator for randomised rehearsal and performance sets
-- [X] Full CRUD; update and delete operations exposed in the UI for authorised members
+- [x] Full CRUD; update and delete operations exposed in the UI for authorised members
 - [ ] Multiple repertoire support for managing separate song lists across special masses and performances
 
 See the [open issues](https://github.com/teddycitrus/songchart/issues) for a full list of proposed features and known bugs.
