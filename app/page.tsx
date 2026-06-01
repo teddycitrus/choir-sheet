@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronDown, ChevronUp, ExternalLink, FileText, Link as LinkIcon, Lock,
-  MessageSquareText, Paperclip, Pencil, Plus, Search, Shuffle, Trash2, Upload, X
+  MessageSquareText, Paperclip, Pencil, Plus, Search, Shuffle, Trash2, Unlock, Upload, X
 } from "lucide-react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../convex/_generated/api";
@@ -437,6 +437,11 @@ export default function Home() {
   const [showMobileActions, setShowMobileActions] = useState(false);
   const [repertoire, setRepertoire] = useState<{ entrance: Song; communion: Song; recessional: Song } | null>(null);
   const [repertoireError, setRepertoireError] = useState("");
+  // Per-slot freeze: a frozen slot keeps its current song on respin while the
+  // others keep spinning. Reset whenever the lineup is opened or closed.
+  const [lockedSlots, setLockedSlots] = useState<{ entrance: boolean; communion: boolean; recessional: boolean }>(
+    { entrance: false, communion: false, recessional: false }
+  );
   // Horizontal-scroll tracking — when the table container is scrolled right,
   // the sticky Song column becomes a "floating" label (transparent, smaller).
   const tableWrapRef = useRef<HTMLDivElement>(null);
@@ -697,7 +702,9 @@ export default function Home() {
     return pool[pool.length - 1];
   }
 
-  const generateRepertoire = () => {
+  // respectLocks=false → fresh pick for all 3 (initial open).
+  // respectLocks=true  → frozen slots keep their current song (respin).
+  const generateRepertoire = (respectLocks = false) => {
     setRepertoireError("");
     const byType = (t: string) => songs.filter(s => s.type?.includes(t));
     const entrancePool    = byType("entrance");
@@ -716,11 +723,11 @@ export default function Home() {
       return;
     }
 
-    setRepertoire({
-      entrance:    weightedPick(entrancePool),
-      communion:   weightedPick(communionPool),
-      recessional: weightedPick(recessionalPool),
-    });
+    setRepertoire(prev => ({
+      entrance:    respectLocks && lockedSlots.entrance    && prev ? prev.entrance    : weightedPick(entrancePool),
+      communion:   respectLocks && lockedSlots.communion   && prev ? prev.communion   : weightedPick(communionPool),
+      recessional: respectLocks && lockedSlots.recessional && prev ? prev.recessional : weightedPick(recessionalPool),
+    }));
   };
 
   const confirmRepertoire = async () => {
@@ -738,6 +745,7 @@ export default function Home() {
       });
       setShowRepertoireModal(false);
       setRepertoire(null);
+      setLockedSlots({ entrance: false, communion: false, recessional: false });
     } catch (err) {
       setRepertoireError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
@@ -948,11 +956,11 @@ export default function Home() {
 
       {/* Repertoire modal */}
       {showRepertoireModal && (
-        <ModalOverlay onClose={() => { if (!confirming) { setShowRepertoireModal(false); setRepertoire(null); setRepertoireError(""); } }}>
+        <ModalOverlay onClose={() => { if (!confirming) { setShowRepertoireModal(false); setRepertoire(null); setRepertoireError(""); setLockedSlots({ entrance: false, communion: false, recessional: false }); } }}>
           <ModalPanel
             title="random repertoire"
             subtitle="if ur too lazy to pick songs manually ig"
-            onClose={() => { if (!confirming) { setShowRepertoireModal(false); setRepertoire(null); setRepertoireError(""); } }}
+            onClose={() => { if (!confirming) { setShowRepertoireModal(false); setRepertoire(null); setRepertoireError(""); setLockedSlots({ entrance: false, communion: false, recessional: false }); } }}
           >
             <div className="px-6 py-5 space-y-3">
               {repertoireError && (
@@ -962,13 +970,26 @@ export default function Home() {
                 <div className="space-y-2">
                   {(["entrance", "communion", "recessional"] as const).map(slot => {
                     const song = repertoire[slot];
+                    const frozen = lockedSlots[slot];
                     return (
                       <div key={slot} className="flex items-center justify-between rounded-md border border-[#262626] bg-[#0a0a0a] px-4 py-3">
                         <div>
                           <p className="text-white text-sm font-medium">{song.name}</p>
                           <p className="text-[#71717a] text-xs mt-0.5">{song.key || "—"}{song.bpm ? ` · ${song.bpm} bpm` : ""}</p>
                         </div>
-                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${TYPE_PILLS[slot]}`}>{slot}</span>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${TYPE_PILLS[slot]}`}>{slot}</span>
+                          <button
+                            type="button"
+                            onClick={() => setLockedSlots(l => ({ ...l, [slot]: !l[slot] }))}
+                            className={`p-1.5 rounded-md ${TX} ${frozen ? "text-white bg-[#262626]" : "text-[#71717a] hover:text-white hover:bg-[#262626]"}`}
+                            title={frozen ? "Unfreeze — let this slot spin again" : "Freeze this song — keep it on respin"}
+                            aria-label={frozen ? "Unfreeze song" : "Freeze song"}
+                            aria-pressed={frozen}
+                          >
+                            {frozen ? <Lock size={14} /> : <Unlock size={14} />}
+                          </button>
+                        </div>
                       </div>
                     );
                   })}
@@ -978,7 +999,7 @@ export default function Home() {
             <ModalFooter>
               <button
                 type="button"
-                onClick={generateRepertoire}
+                onClick={() => generateRepertoire(true)}
                 disabled={confirming}
                 className={`${BTN_GHOST} disabled:opacity-40`}
               >
@@ -1082,7 +1103,7 @@ export default function Home() {
         <div className="hidden sm:flex items-center gap-2">
           {auth && (
             <button
-              onClick={() => { setShowRepertoireModal(true); generateRepertoire(); }}
+              onClick={() => { setLockedSlots({ entrance: false, communion: false, recessional: false }); setShowRepertoireModal(true); generateRepertoire(); }}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-[#141414] border border-[#262626] text-white ${TX} hover:bg-[#1a1a1a]`}
             >
               <Shuffle size={14} /> Generate lineup
@@ -1402,6 +1423,7 @@ export default function Home() {
                 type="button"
                 onClick={() => {
                   setShowMobileActions(false);
+                  setLockedSlots({ entrance: false, communion: false, recessional: false });
                   setShowRepertoireModal(true);
                   generateRepertoire();
                 }}
