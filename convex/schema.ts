@@ -10,7 +10,9 @@ export default defineSchema({
     listen:        v.optional(v.string()),
     chords:        v.string(),
     key:           v.string(),
-    transpose:     v.string(),
+    // Retained in storage but no longer surfaced in the UI. Kept optional so
+    // existing docs stay valid and new songs can omit it. See convex/songs.ts.
+    transpose:     v.optional(v.string()),
     capo:          v.string(),
     bpm:           v.string(),
     beat:          v.string(),

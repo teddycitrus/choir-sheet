@@ -56,7 +56,6 @@ const COLUMNS: { key: keyof Song; label: string; sortable: boolean }[] = [
   { key: "chords",    label: "Chords",    sortable: false },
   { key: "lyrics",    label: "Lyrics",    sortable: false },
   { key: "key",       label: "Key",       sortable: true  },
-  { key: "transpose", label: "Transpose", sortable: true  },
   { key: "capo",      label: "Capo",      sortable: true  },
   { key: "bpm",       label: "BPM",       sortable: true  },
   { key: "beat",      label: "Beat",      sortable: true  },
@@ -65,7 +64,7 @@ const COLUMNS: { key: keyof Song; label: string; sortable: boolean }[] = [
 ];
 
 const EMPTY_FORM = {
-  name: "", listen: "", chords: "", key: "", transpose: "",
+  name: "", listen: "", chords: "", key: "",
   capo: "", bpm: "", beat: "",
   type: [] as string[],
   usage_counter: 0,
@@ -343,11 +342,7 @@ function SongFormBody({
         />
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div>
-          <label className="text-white text-sm font-medium">Transpose</label>
-          <input id="transpose" className={INPUT_CLS} value={formData.transpose} onChange={onChangeText} placeholder="0" />
-        </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <label className="text-white text-sm font-medium">Capo</label>
           <input id="capo" className={INPUT_CLS} value={formData.capo} onChange={onChangeText} placeholder="0" />
@@ -500,7 +495,7 @@ export default function Home() {
     if (selectedSong) {
       setFormData({
         name: selectedSong.name, listen: selectedSong.listen ?? "",
-        chords: selectedSong.chords, key: selectedSong.key, transpose: selectedSong.transpose,
+        chords: selectedSong.chords, key: selectedSong.key,
         capo: selectedSong.capo, bpm: selectedSong.bpm, beat: selectedSong.beat,
         type: selectedSong.type ?? [], usage_counter: selectedSong.usage_counter ?? 0,
         lyrics: selectedSong.lyrics ?? "",
@@ -619,7 +614,6 @@ export default function Home() {
         listen:          formData.listen || undefined,
         chords:          formData.chords,
         key:             formData.key,
-        transpose:       formData.transpose,
         capo:            formData.capo,
         bpm:             formData.bpm,
         beat:            formData.beat,
@@ -667,7 +661,6 @@ export default function Home() {
         listen:          formData.listen || undefined,
         chords:          formData.chords,
         key:             formData.key,
-        transpose:       formData.transpose,
         capo:            formData.capo,
         bpm:             formData.bpm,
         beat:            formData.beat,
@@ -1236,7 +1229,6 @@ export default function Home() {
                     ) : <span className="text-[#3f3f46]">—</span>}
                   </td>
                   <td className="px-4 py-3 text-[#71717a] text-sm">{song.key || <span className="text-[#3f3f46]">—</span>}</td>
-                  <td className="px-4 py-3 text-[#71717a] text-sm">{song.transpose || <span className="text-[#3f3f46]">—</span>}</td>
                   <td className="px-4 py-3 text-[#71717a] text-sm">{song.capo || <span className="text-[#3f3f46]">—</span>}</td>
                   <td className="px-4 py-3 text-[#71717a] text-sm">{song.bpm || <span className="text-[#3f3f46]">—</span>}</td>
                   <td className="px-4 py-3 text-[#71717a] text-sm">{song.beat || <span className="text-[#3f3f46]">—</span>}</td>
@@ -1313,7 +1305,6 @@ export default function Home() {
                 { label: "Key",       value: song.key },
                 { label: "BPM",       value: song.bpm },
                 { label: "Capo",      value: song.capo },
-                { label: "Transpose", value: song.transpose },
                 { label: "Beat",      value: song.beat },
               ].filter(m => !!m.value);
 

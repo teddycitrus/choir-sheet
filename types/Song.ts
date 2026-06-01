@@ -4,7 +4,8 @@ export type Song = {
   listen?: string;
   chords: string;
   key: string;
-  transpose: string;
+  // Retained in the backend but no longer fetched or shown in the UI.
+  transpose?: string;
   capo: string;
   bpm: string;
   beat: string;

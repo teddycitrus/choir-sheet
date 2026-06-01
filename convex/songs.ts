@@ -8,7 +8,8 @@ const songFields = {
   listen:        v.optional(v.string()),
   chords:        v.string(),
   key:           v.string(),
-  transpose:     v.string(),
+  // Hidden from the UI but still stored. Optional so the client can omit it.
+  transpose:     v.optional(v.string()),
   capo:          v.string(),
   bpm:           v.string(),
   beat:          v.string(),
@@ -35,8 +36,11 @@ export const list = query({
         s.chordsStorageId ? ctx.db.system.get(s.chordsStorageId) : null,
         s.lyricsStorageId ? ctx.db.system.get(s.lyricsStorageId) : null,
       ]);
+      // `transpose` is retained in the DB but intentionally not sent to the
+      // client — it's no longer surfaced anywhere in the UI.
+      const { transpose: _transpose, ...rest } = s;
       return {
-        ...s,
+        ...rest,
         chordsFileUrl:  chordsUrl,
         lyricsFileUrl:  lyricsUrl,
         chordsFileType: extFromContentType(chordsMeta?.contentType ?? null),
@@ -102,7 +106,12 @@ export const update = mutation({
         await ctx.storage.delete(existing.lyricsStorageId);
       }
     }
-    await ctx.db.replace(id, song);
+    // The client no longer sends `transpose`, but `replace` overwrites the
+    // whole doc — carry the stored value forward so we don't lose the data.
+    await ctx.db.replace(id, {
+      ...song,
+      transpose: song.transpose ?? existing?.transpose,
+    });
   },
 });
 
