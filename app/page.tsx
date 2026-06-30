@@ -50,14 +50,16 @@ const BTN_PRIMARY =
 const BTN_DANGER =
   `inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md bg-red-600 text-white ${TX} hover:bg-red-500 disabled:opacity-40 disabled:cursor-not-allowed`;
 
-const COLUMNS: { key: keyof Song; label: string; sortable: boolean }[] = [
+// `numeric` columns are right-aligned with tabular figures so digits line up by
+// place value (column reads as a number, not as text).
+const COLUMNS: { key: keyof Song; label: string; sortable: boolean; numeric?: boolean }[] = [
   { key: "name",      label: "Song",      sortable: true  },
   { key: "listen",    label: "Video",    sortable: false },
   { key: "chords",    label: "Chords",    sortable: false },
   { key: "lyrics",    label: "Lyrics",    sortable: false },
   { key: "key",       label: "Key",       sortable: true  },
-  { key: "capo",      label: "Capo",      sortable: true  },
-  { key: "bpm",       label: "BPM",       sortable: true  },
+  { key: "capo",      label: "Capo",      sortable: true, numeric: true },
+  { key: "bpm",       label: "BPM",       sortable: true, numeric: true },
   { key: "beat",      label: "Beat",      sortable: true  },
   { key: "type",      label: "Type",      sortable: false },
   { key: "notes",     label: "Notes",     sortable: false },
@@ -458,8 +460,6 @@ export default function Home() {
       setAuth(true);
     }
   }, []);
-  const poop = deleteError;
-  console.log(poop);
   // Track whether the table is horizontally scrolled, so the sticky Song
   // column can collapse to a smaller, transparent floating label.
   useEffect(() => {
@@ -826,7 +826,11 @@ export default function Home() {
             size="sm"
             onClose={() => { if (!deleting) { setSongToDelete(null); setDeleteError(""); } }}
           >
-            
+            {deleteError && (
+              <div className="px-6 pt-5">
+                <p className={ERR_BOX}>{deleteError}</p>
+              </div>
+            )}
             <ModalFooter>
               <button
                 type="button"
@@ -1149,13 +1153,19 @@ export default function Home() {
                     // corner transparent so underlying content is visible.
                     ? "sticky left-0 z-20 bg-transparent pointer-events-none invisible"
                     : "sticky left-0 z-20 bg-[#0a0a0a] border-r border-[#1a1a1a]";
+                const sortTip = col.sortable
+                  ? sortKey === col.key
+                    ? `Sorted by ${col.label} (${sortDir === "asc" ? "ascending" : "descending"}) — click to reverse`
+                    : `Sort by ${col.label}`
+                  : undefined;
                 return (
                   <th
                     key={col.key}
                     onClick={() => col.sortable ? toggleSort(col.key) : undefined}
-                    className={`px-4 py-3 text-left text-xs font-medium text-[#71717a] whitespace-nowrap select-none ${col.sortable ? `cursor-pointer hover:text-[#a1a1aa] ${TX}` : ""} ${stickyCls}`}
+                    title={sortTip}
+                    className={`px-4 py-3 ${col.numeric ? "text-right" : "text-left"} text-xs font-medium text-[#71717a] whitespace-nowrap select-none ${col.sortable ? `cursor-pointer hover:text-[#a1a1aa] ${TX}` : ""} ${stickyCls}`}
                   >
-                    <span className="inline-flex items-center gap-1">
+                    <span className={`inline-flex items-center gap-1 ${col.numeric ? "flex-row-reverse" : ""}`}>
                       {col.label}
                       {col.sortable && sortKey === col.key && (
                         sortDir === "asc"
@@ -1229,8 +1239,8 @@ export default function Home() {
                     ) : <span className="text-[#3f3f46]">—</span>}
                   </td>
                   <td className="px-4 py-3 text-[#71717a] text-sm">{song.key || <span className="text-[#3f3f46]">—</span>}</td>
-                  <td className="px-4 py-3 text-[#71717a] text-sm">{song.capo || <span className="text-[#3f3f46]">—</span>}</td>
-                  <td className="px-4 py-3 text-[#71717a] text-sm">{song.bpm || <span className="text-[#3f3f46]">—</span>}</td>
+                  <td className="px-4 py-3 text-right tabular-nums text-[#71717a] text-sm">{song.capo || <span className="text-[#3f3f46]">—</span>}</td>
+                  <td className="px-4 py-3 text-right tabular-nums text-[#71717a] text-sm">{song.bpm || <span className="text-[#3f3f46]">—</span>}</td>
                   <td className="px-4 py-3 text-[#71717a] text-sm">{song.beat || <span className="text-[#3f3f46]">—</span>}</td>
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap gap-1">
